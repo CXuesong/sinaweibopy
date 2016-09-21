@@ -9,11 +9,11 @@ Python client SDK for SNS API using OAuth 2. Require Python 2.6/2.7.
 '''
 
 try:
-    from cStringIO import StringIO
+    from io import StringIO
 except ImportError:
-    from StringIO import StringIO
+    from io import StringIO
 
-import gzip, time, json, hmac, base64, hashlib, urllib, urllib2, urlparse, logging, mimetypes, collections
+import gzip, time, json, hmac, base64, hashlib, urllib.request, urllib.parse, urllib.error, urllib.request, urllib.error, urllib.parse, urllib.parse, logging, mimetypes, collections
 
 class JsonDict(dict):
     '''
@@ -44,7 +44,7 @@ class JsonDict(dict):
     def __setattr__(self, attr, value):
         self[attr] = value
 
-class APIError(StandardError):
+class APIError(Exception):
     '''
     raise APIError if receiving json message indicating failure.
     '''
@@ -52,7 +52,7 @@ class APIError(StandardError):
         self.error_code = error_code
         self.error = error
         self.request = request
-        StandardError.__init__(self, error)
+        Exception.__init__(self, error)
 
     def __str__(self):
         return 'APIError: %s: %s, request: %s' % (self.error_code, self.error, self.request)
@@ -67,7 +67,7 @@ def _parse_json(s):
     >>> r['score']
     95
     '''
-    return json.loads(s, object_hook=lambda pairs: JsonDict(pairs.iteritems()))
+    return json.loads(s, object_hook=lambda pairs: JsonDict(iter(pairs.items())))
 
 def _encode_params(**kw):
     '''
@@ -75,21 +75,21 @@ def _encode_params(**kw):
 
     >>> _encode_params(a=1, b='R&D')
     'a=1&b=R%26D'
-    >>> _encode_params(a=u'\u4e2d\u6587', b=['A', 'B', 123])
+    >>> _encode_params(a=u'\\u4e2d\\u6587', b=['A', 'B', 123])
     'a=%E4%B8%AD%E6%96%87&b=A&b=B&b=123'
     '''
     def _encode(L, k, v):
-        if isinstance(v, unicode):
-            L.append('%s=%s' % (k, urllib.quote(v.encode('utf-8'))))
+        if isinstance(v, str):
+            L.append('%s=%s' % (k, urllib.parse.quote(v.encode('utf-8'))))
         elif isinstance(v, str):
-            L.append('%s=%s' % (k, urllib.quote(v)))
+            L.append('%s=%s' % (k, urllib.parse.quote(v)))
         elif isinstance(v, collections.Iterable):
             for x in v:
                 _encode(L, k, x)
         else:
-            L.append('%s=%s' % (k, urllib.quote(str(v))))
+            L.append('%s=%s' % (k, urllib.parse.quote(str(v))))
     args = []
-    for k, v in kw.iteritems():
+    for k, v in kw.items():
         _encode(args, k, v)
     return '&'.join(args)
 
@@ -97,7 +97,7 @@ def _encode_multipart(**kw):
     ' build a multipart/form-data body with randomly generated boundary '
     boundary = '----------%s' % hex(int(time.time() * 1000))
     data = []
-    for k, v in kw.iteritems():
+    for k, v in kw.items():
         data.append('--%s' % boundary)
         if hasattr(v, 'read'):
             # file-like object:
@@ -109,7 +109,7 @@ def _encode_multipart(**kw):
             data.append(content)
         else:
             data.append('Content-Disposition: form-data; name="%s"\r\n' % k)
-            data.append(v.encode('utf-8') if isinstance(v, unicode) else v)
+            data.append(v.encode('utf-8') if isinstance(v, str) else v)
     data.append('--%s--\r\n' % boundary)
     return '\r\n'.join(data), boundary
 
@@ -157,15 +157,15 @@ def _http(method, url, headers=None, **kw):
     http_url = '%s?%s' % (url, params) if method==_HTTP_GET else url
     http_body = None if method=='GET' else params
     logging.error('%s: %s' % (method, http_url))
-    req = urllib2.Request(http_url, data=http_body)
+    req = urllib.request.Request(http_url, data=http_body)
     req.add_header('Accept-Encoding', 'gzip')
     if headers:
-        for k, v in headers.iteritems():
+        for k, v in headers.items():
             req.add_header(k, v)
     if boundary:
         req.add_header('Content-Type', 'multipart/form-data; boundary=%s' % boundary)
     try:
-        resp = urllib2.urlopen(req, timeout=5)
+        resp = urllib.request.urlopen(req, timeout=5)
         return _read_http_body(resp)
     finally:
         pass
@@ -178,7 +178,7 @@ class SNSMixin(object):
         self._redirect_uri = redirect_uri
 
     def _prepare_api(self, method, path, access_token, **kw):
-        raise StandardError('Subclass must implement \'_prepare_api\' method.')
+        raise Exception('Subclass must implement \'_prepare_api\' method.')
 
     def on_http_error(self, e):
         try:
@@ -254,7 +254,7 @@ class SinaWeiboMixin(SNSMixin):
         enc_sig, enc_payload = sr.split('.', 1)
         sig = base64.b64decode(_b64_normalize(enc_sig))
         data = _parse_json(base64.b64decode(_b64_normalize(enc_payload)))
-        if data['algorithm'] != u'HMAC-SHA256':
+        if data['algorithm'] != 'HMAC-SHA256':
             return None
         expected_sig = hmac.new(self.client_secret, enc_payload, hashlib.sha256).digest();
         if expected_sig==sig:
@@ -316,8 +316,8 @@ class QQMixin(SNSMixin):
         return JsonDict(access_token=access_token, expires=expires, **r)
 
     def _qs2dict(self, text):
-        qs = urlparse.parse_qs(text)
-        return dict(((k, v[0]) for k, v in qs.iteritems()))
+        qs = urllib.parse.parse_qs(text)
+        return dict(((k, v[0]) for k, v in qs.items()))
 
     def get_openid(self, access_token):
         resp_text = _http('GET', 'https://graph.z.qq.com/moc2/me', access_token=access_token)
@@ -373,7 +373,7 @@ class APIClient(object):
         logging.debug('Call API: %s: %s' % (method, the_url))
         try:
             resp = _http(method, the_url, headers, **params)
-        except urllib2.HTTPError, e:
+        except urllib.error.HTTPError as e:
             return self._mixin.on_http_error(e)
         r = _parse_json(resp)
         if hasattr(r, 'error_code'):

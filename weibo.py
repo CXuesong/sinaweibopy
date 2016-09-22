@@ -87,9 +87,9 @@ def _encode_multipart(**kw):
             data.append(content)
         else:
             data.append('Content-Disposition: form-data; name="%s"\r\n' % k)
-            data.append(v.encode('utf-8') if isinstance(v, str) else v)
+            data.append(v)
     data.append('--%s--\r\n' % boundary)
-    return '\r\n'.join(data), boundary
+    return b'\r\n'.join((v.encode('utf-8') if isinstance(v, str) else v) for v in data), boundary
 
 def _guess_content_type(url):
     n = url.rfind('.')
@@ -141,7 +141,8 @@ def _http_call(the_url, method, authorization, **kw):
             the_url = the_url.replace('https://api.', 'https://rm.api.')
     http_url = '%s?%s' % (the_url, params) if method==_HTTP_GET else the_url
     http_body = None if method==_HTTP_GET else params
-    if http_body : http_body = http_body.encode()
+    if http_body and isinstance(http_body, str):
+        http_body = http_body.encode()
     req = urllib.request.Request(http_url, data=http_body)
     req.add_header('Accept-Encoding', 'gzip')
     if authorization:
